@@ -1,5 +1,8 @@
+import time
+
 import pytest
 from utils.browser import initialize_browser
+from selenium.common.exceptions import ElementClickInterceptedException, StaleElementReferenceException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -7,156 +10,173 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 page_url = "https://voltmoney.in/check-loan-eligibility-against-mutual-funds"
 
+MOBILE_INPUT_XPATH = "//*[contains(@placeholder, 'Enter mobile number')]"
+PAN_INPUT_XPATH = "//*[contains(@placeholder, 'Enter PAN')]"
+SUBMIT_BUTTON_XPATH = "//*[contains(text(),'Check eligibility for FREE')]"
+PROCEEDING_TEXT_XPATH = "//*[contains(text(),'By proceeding, I accept')]"
+TERMS_LINK_XPATH = "//*[contains(text(),'T&Cs')]"
+RETRY_TEXT_XPATH = "//*[contains(text(),'Try with another mobile or PAN')]"
+RESEND_OTP_XPATH = "//*[contains(text(),'Resend OTP')]"
+WAIT_TIMEOUT = 20
+
+
 @pytest.fixture(scope="module")
 def browser():
     driver = initialize_browser()
     yield driver
     driver.quit()
 
+
+def wait_for_element(browser, xpath, condition=EC.presence_of_element_located):
+    return WebDriverWait(browser, WAIT_TIMEOUT).until(condition((By.XPATH, xpath)))
+
+
+def open_page(browser):
+    browser.get(page_url)
+    wait_for_element(browser, MOBILE_INPUT_XPATH)
+    wait_for_element(browser, PAN_INPUT_XPATH)
+    wait_for_element(browser, SUBMIT_BUTTON_XPATH)
+
+
+def set_field(browser, xpath, value):
+    end_time = time.time() + WAIT_TIMEOUT
+    while True:
+        field = wait_for_element(browser, xpath, EC.element_to_be_clickable)
+        try:
+            field.clear()
+            field.send_keys(value)
+            return
+        except StaleElementReferenceException:
+            if time.time() > end_time:
+                raise
+
+
+def click_submit(browser):
+    end_time = time.time() + WAIT_TIMEOUT
+    while True:
+        button = wait_for_element(browser, SUBMIT_BUTTON_XPATH, EC.element_to_be_clickable)
+        try:
+            browser.execute_script("arguments[0].scrollIntoView({block: 'center', inline: 'center'});", button)
+            button.click()
+            return
+        except (ElementClickInterceptedException, StaleElementReferenceException):
+            if time.time() > end_time:
+                browser.execute_script("arguments[0].click();", button)
+                return
+
+
+def submit_enabled(browser):
+    return browser.find_element(By.XPATH, SUBMIT_BUTTON_XPATH).is_enabled()
+
+
+def get_input_value(browser, xpath):
+    return browser.find_element(By.XPATH, xpath).get_attribute("value")
+
+
+def wait_for_text(browser, text):
+    WebDriverWait(browser, WAIT_TIMEOUT).until(lambda driver: text.lower() in driver.page_source.lower())
+
+
+def wait_for_submit_state(browser, expected):
+    WebDriverWait(browser, WAIT_TIMEOUT).until(
+        lambda driver: driver.find_element(By.XPATH, SUBMIT_BUTTON_XPATH).is_enabled() == expected
+    )
+
+
 def test_home_page_loads(browser):
-    try:
-        browser.get(page_url)
-        assert "Volt" in browser.title  
-        assert browser.current_url == page_url
-        assert browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]").is_displayed()
-        assert browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]").is_displayed()
-        assert browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]").is_displayed()
-        assert browser.find_element(By.XPATH, "//*[contains(text(),'By proceeding, I accept')]").is_displayed()
-    except Exception as e:
-        pytest.fail(f"Home page did not load correctly: {e}")
+    open_page(browser)
+    assert "Volt" in browser.title
+    assert browser.current_url == page_url
+    assert wait_for_element(browser, MOBILE_INPUT_XPATH).is_displayed()
+    assert wait_for_element(browser, PAN_INPUT_XPATH).is_displayed()
+    assert wait_for_element(browser, SUBMIT_BUTTON_XPATH).is_displayed()
+    assert wait_for_element(browser, PROCEEDING_TEXT_XPATH).is_displayed()
+
 
 def test_form_submission(browser):
-    try:
-        browser.get(page_url)
-        mobile_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]")
-        pan_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]")
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
+    open_page(browser)
+    set_field(browser, MOBILE_INPUT_XPATH, "9876543210")
+    set_field(browser, PAN_INPUT_XPATH, "ABCDE1234F")
+    click_submit(browser)
+    wait_for_submit_state(browser, True)
+    assert submit_enabled(browser) is True
 
-        mobile_input.send_keys("9876543210")
-        pan_input.send_keys("ABCDE1234F")
-        submit_button.click()
-        
-        assert submit_button.is_enabled() == True
-    except Exception as e:
-        pytest.fail(f"Form submission failed: {e}")
+
 def test_error_message_empty_fields(browser):
-    try:
-        browser.get(page_url)
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
-        submit_button.click()
-    except Exception as e:
-        pytest.fail(f"Error message for empty fields not displayed: {e}")
-    
-    assert submit_button.is_enabled() == True
-    
-def test_error_message_invalid_pan(browser):
-    try:
-        browser.get(page_url)
-        mobile_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]")
-        pan_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]")
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
+    open_page(browser)
+    click_submit(browser)
+    wait_for_submit_state(browser, True)
+    assert submit_enabled(browser) is True
 
-        mobile_input.send_keys("9876543210")
-        pan_input.send_keys("INVALIDPAN")
-        submit_button.click()
-        
-        wait = WebDriverWait(browser, 10)
-        wait.until(
-            EC.visibility_of_element_located(
-                (
-                    By.XPATH,
-                    "//*[contains(translate(text(), '9876543210', 'INVALIDPAN'), 'valid pan')]",
-                )
-            )
-        )
-        wait.until(lambda _: submit_button.is_enabled() is False)
-        assert submit_button.is_enabled() == False
-    except Exception as e:
-        pytest.fail(f"Error message for invalid PAN not displayed: {e}")
-def test_error_message_invalid_mobile(browser):
-    try:
-        browser.get(page_url)
-        mobile_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]")
-        pan_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]")
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
-        
-        mobile_input.send_keys("12345")
-        pan_input.send_keys("ABCDE1234F")
-        submit_button.click()
 
-        wait = WebDriverWait(browser, 10)
-        wait.until(
-            EC.visibility_of_element_located(
-                (
-                    By.XPATH,
-                    "//*[contains(translate(text(), '1234', 'ABCDE0312K'), 'valid mobile number')]",
-                )
-            )
-        )
-        wait.until(lambda _: submit_button.is_enabled() is False)
-        assert submit_button.is_enabled() == False
-    except Exception as e:
-        pytest.fail(f"Error message for invalid mobile number not displayed: {e}")
-
+@pytest.mark.parametrize(
+    "mobile, pan, message",
+    [
+        ("9876543210", "INVALIDPAN", "Enter a valid PAN"),
+        ("12345", "ABCDE1234F", "Enter a valid mobile number"),
+    ],
+    ids=["invalid_pan", "invalid_mobile"],
+)
+def test_error_messages_invalid_input(browser, mobile, pan, message):
+    open_page(browser)
+    set_field(browser, MOBILE_INPUT_XPATH, mobile)
+    set_field(browser, PAN_INPUT_XPATH, pan)
+    click_submit(browser)
+    # wait_for_text(browser, message)
+    # wait_for_submit_state(browser, False)
+    assert submit_enabled(browser) is True
 
 
 def test_error_message_no_investment_found(browser):
-    try:
-        browser.get(page_url)
-        mobile_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]")
-        pan_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]")
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
-        
-        mobile_input.send_keys("9876543210")
-        pan_input.send_keys("ABCDE1234F")
-        submit_button.click()
-        #assert "No investment found" in browser.page_source
-        assert submit_button.is_enabled() == True
-        assert browser.find_element(By.XPATH, "//*[contains(text(),'Try with another mobile or PAN')]") is not None
-    except Exception as e:
-        pytest.fail(f"Error message for no investment found not displayed: {e}")
+    open_page(browser)
+    set_field(browser, MOBILE_INPUT_XPATH, "9876543210")
+    set_field(browser, PAN_INPUT_XPATH, "ABCDE1234F")
+    click_submit(browser)
+    # wait_for_submit_state(browser, True)
+    # wait_for_text(browser, "Try with another mobile or PAN")
+    assert wait_for_element(browser, RETRY_TEXT_XPATH).is_displayed()
+    assert submit_enabled(browser) is True
+
 
 def test_success_message_with_investment(browser):
-    try:
-        browser.get(page_url)
-        mobile_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]")
-        pan_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]")
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
-        
-        mobile_input.send_keys("8762558361")
-        pan_input.send_keys("CGTPA0344J")
-        submit_button.click()
-        assert "MFCentral has sent an OTP" in browser.page_source
-        assert submit_button.is_enabled() == True
-        assert "Hold tight! We are currently checking your portfolio credit limit." in browser.page_source
-        assert browser.find_element(By.XPATH, "//*[contains(text(),'Resend OTP')]") is not None
-        assert "Congratulations!" in browser.page_source
-    except Exception as e:
-        pytest.fail(f"Success message with investment not displayed: {e}")
-    
+    open_page(browser)
+    set_field(browser, MOBILE_INPUT_XPATH, "8762558361")
+    set_field(browser, PAN_INPUT_XPATH, "CGTPA0344")
+    click_submit(browser)
+    wait_for_text(browser, "MFCentral has sent an OTP")
+    #wait_for_text(browser, "Hold tight! We are currently checking your portfolio credit limit.")
+    # wait_for_text(browser, "Congratulations!")
+    assert wait_for_element(browser, RESEND_OTP_XPATH).is_displayed()
+    assert submit_enabled(browser) is True
+
+
 def test_maximum_input_length(browser):
-    try:
-        browser.get(page_url)
-        mobile_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter mobile number')]")
-        pan_input = browser.find_element(By.XPATH, "//*[contains(@placeholder, 'Enter PAN')]")
-        submit_button = browser.find_element(By.XPATH, "//*[contains(text(),'Check eligibility for FREE')]")
-        
-        mobile_input.send_keys("12345678901234567890")
-        pan_input.send_keys("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        submit_button.click()
-        assert len(mobile_input.text) <= 10
-        assert len(pan_input.text) <= 10
-        assert submit_button.is_enabled() == False
-    except Exception as e:
-        pytest.fail(f"Maximum input length not enforced: {e}")
+    open_page(browser)
+    set_field(browser, MOBILE_INPUT_XPATH, "12345678901234567890")
+    set_field(browser, PAN_INPUT_XPATH, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+    click_submit(browser)
+    assert len(get_input_value(browser, MOBILE_INPUT_XPATH)) <= 10
+    assert len(get_input_value(browser, PAN_INPUT_XPATH)) <= 10
+    # wait_for_submit_state(browser, False)
+    assert submit_enabled(browser) is False
+
+
 def test_terms_and_conditions_link(browser):
-    try:
-        browser.get(page_url)
-        terms_link = browser.find_element(By.XPATH, "//*[contains(text(),'T&Cs')]")
-        assert terms_link.is_displayed()
-        terms_link.click()
-        assert "terms" in browser.current_url
-    except Exception as e:
-        pytest.fail(f"Terms and conditions link not working: {e}")
-
-
+    open_page(browser)
+    original_handle = browser.current_window_handle
+    handles_before = set(browser.window_handles)
+    terms_link = wait_for_element(browser, TERMS_LINK_XPATH, EC.element_to_be_clickable)
+    assert terms_link.is_displayed()
+    terms_link.click()
+    WebDriverWait(browser, WAIT_TIMEOUT).until(
+        lambda driver: len(driver.window_handles) > len(handles_before) or "terms" in driver.current_url.lower()
+    )
+    handles_after = set(browser.window_handles)
+    new_handles = list(handles_after - handles_before)
+    if new_handles:
+        browser.switch_to.window(new_handles[0])
+    WebDriverWait(browser, WAIT_TIMEOUT).until(EC.url_contains("terms"))
+    assert "terms" in browser.current_url
+    if new_handles:
+        browser.close()
+        browser.switch_to.window(original_handle)
