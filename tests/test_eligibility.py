@@ -114,6 +114,8 @@ def test_error_message_empty_fields(browser):
     [
         ("9876543210", "INVALIDPAN", "Enter a valid PAN"),
         ("12345", "ABCDE1234F", "Enter a valid mobile number"),
+        ("abcd567890", "ABCDE1234F", "Enter a valid mobile number"),
+        ("9876543210", "1234ABCDE", "Enter a valid PAN"),
     ],
     ids=["invalid_pan", "invalid_mobile"],
 )
@@ -141,7 +143,7 @@ def test_error_message_no_investment_found(browser):
 def test_success_message_with_investment(browser):
     open_page(browser)
     set_field(browser, MOBILE_INPUT_XPATH, "8762558361")
-    set_field(browser, PAN_INPUT_XPATH, "CGTPA0344")
+    set_field(browser, PAN_INPUT_XPATH, "CGTPA0344J")
     click_submit(browser)
     wait_for_text(browser, "MFCentral has sent an OTP")
     #wait_for_text(browser, "Hold tight! We are currently checking your portfolio credit limit.")
